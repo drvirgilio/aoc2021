@@ -11,7 +11,7 @@ const gpa = util.gpa;
 
 const data = @embedFile("../data/day08.txt");
 //const data = "acedgfb cdfbe gcdfa fbcad dab cefabd cdfgeb eafb cagedb ab | cdfeb fcadb cdfeb cdbaf";
-const example_data = 
+const example_data =
     \\be cfbegad cbdgef fgaecd cgeb fdcge agebfd fecdb fabcd edb | fdgacbe cefdb cefbgd gcbe
     \\edbfga begcd cbg gc gcadebf fbgde acbgfd abcde gfcbed gfec | fcgedb cgb dgebacf gc
     \\fgaebd cg bdaec gdafb agbcfd gdcbef bgcad gfac gcb cdgabef | cg cg fdcagb cbg
@@ -36,11 +36,17 @@ fn encodePattern(s: []const u8) u7 {
 }
 fn segmentCount(pattern: u7) u3 {
     var count: u3 = 0;
-    var i: usize = 0; while (i < 7) : (i += 1) {
+    var i: usize = 0;
+    while (i < 7) : (i += 1) {
         const segment = (pattern >> @truncate(u3, i)) & 1;
         if (segment == 1) count += 1;
     }
     return count;
+}
+fn letter(c: u8) u3 {
+    assert(c >= 'a');
+    assert(c <= 'g');
+    return @truncate(u3, c - 'a');
 }
 
 const Entry = struct {
@@ -55,7 +61,8 @@ pub fn main() !void {
         while (lines.next()) |line| {
             var entries = tokenize(u8, line, " |");
             var entry: Entry = undefined;
-            var index: usize = 0; while (entries.next()) |pattern| : (index += 1) {
+            var index: usize = 0;
+            while (entries.next()) |pattern| : (index += 1) {
                 if (index < 10) {
                     entry.unique[index] = encodePattern(pattern);
                 } else {
@@ -66,9 +73,7 @@ pub fn main() !void {
         }
         break :blk list.toOwnedSlice();
     };
-    
-    //print("{d}\n", .{input[0].unique});
-    
+
     { // part 1
         var count: u32 = 0;
         for (input) |entry| {
@@ -80,9 +85,121 @@ pub fn main() !void {
                 }
             }
         }
-        print ("{}\n", .{count});
+        print("{}\n", .{count});
     }
-    
+
+    { // part 2
+        var answer: u32 = 0;
+        for (input) |entry| {
+            var maps: [7]u7 = undefined; // how to light up each segment
+            var patterns: [10]u7 = undefined; // how to light up each digit
+
+            // fill out patterns for 1, 7, 4, 8
+            for (entry.unique) |pattern| {
+                switch (segmentCount(pattern)) {
+                    2 => patterns[1] = pattern,
+                    3 => patterns[7] = pattern,
+                    4 => patterns[4] = pattern,
+                    7 => patterns[8] = pattern,
+                    else => {},
+                }
+            }
+
+            // a - use 1 and 7 patterns
+            maps[letter('a')] = patterns[1] ^ patterns[7];
+
+            // b, d
+            //   use 1 and 4 to find b&d combintation
+            //   0, 6, 9 each have 6 segments lit
+            //   0 shares one segment with b&d
+            //   6,9 share two segments with b&d
+            //   use 0 to disambiguate b&d
+
+            {
+                const b_and_d = patterns[1] ^ patterns[4];
+                for (entry.unique) |pattern| {
+                    if (segmentCount(pattern) == 6) {
+                        if (segmentCount(pattern & b_and_d) == 1) {
+                            patterns[0] = pattern;
+                            maps[letter('b')] = b_and_d & pattern;
+                            maps[letter('d')] = b_and_d ^ maps[letter('b')];
+                        }
+                    }
+                }
+            }
+
+            // what we know here:
+            // patterns: 0 1 4 7 8
+            // maps: a b d
+
+            // c, f
+            //   use 1 (c&f) to disambiguate 6, 9
+            //   use 6,9 to disambiguate c, f
+            for (entry.unique) |pattern| {
+                const seg_pattern = segmentCount(pattern);
+                const seg_pattern_and_d = segmentCount(pattern & maps[letter('d')]);
+                if ((seg_pattern == 6) and (seg_pattern_and_d == 1)) {
+                    if (segmentCount(pattern & patterns[1]) == 1) {
+                        patterns[6] = pattern;
+                    } else {
+                        patterns[9] = pattern;
+                    }
+                }
+            }
+            maps[letter('c')] = (patterns[6] ^ patterns[9]) & patterns[1];
+            maps[letter('f')] = (patterns[6] & patterns[9]) & patterns[1];
+
+            // what we know here:
+            // patterns: 0 1 4 6 7 8 9 (missing 2 3 5)
+            // map: a b c d f (missing e g)
+
+            // disambiguate 2 and 3
+            for (entry.unique) |pattern| {
+                const segs = segmentCount(pattern);
+                const segs_c = segmentCount(pattern & maps[letter('c')]);
+                const segs_1 = segmentCount(pattern & patterns[1]);
+                if (segs == 5 and segs_c == 1) {
+                    switch (segs_1) {
+                        1 => patterns[2] = pattern,
+                        2 => patterns[3] = pattern,
+                        else => {},
+                    }
+                }
+            }
+            { // e
+                const two = patterns[2] & ~maps[letter('f')];
+                const three = patterns[3] & ~maps[letter('f')];
+                maps[letter('e')] = two ^ three;
+            }
+            { // g
+                maps[letter('g')] = std.math.maxInt(u7);
+                for (maps) |map, index| {
+                    if (index != letter('g')) {
+                        maps[letter('g')] &= ~map;
+                    }
+                }
+            }
+            patterns[5] = patterns[6] & ~maps[letter('e')];
+
+            // find corresponding digit for output section
+            const output: u32 = blk: {
+                var digits: [4]u8 = undefined;
+                for (entry.output) |output, place| {
+                    for (patterns) |pattern, index| {
+                        if (output == pattern) {
+                            digits[place] = @truncate(u8, '0' + index);
+                            break;
+                        }
+                    } else unreachable;
+                }
+                break :blk try parseInt(u32, &digits, 10);
+            };
+
+            answer += output;
+        }
+
+        print("{d}\n", .{answer});
+    }
 }
 
 // Useful stdlib functions
