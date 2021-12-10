@@ -10,6 +10,19 @@ const util = @import("util.zig");
 const gpa = util.gpa;
 
 const data = @embedFile("../data/day10.txt");
+const example_data =
+    \\[({(<(())[]>[[{[]{<()<>>
+    \\[(()[<>])]({[<{<<[]>>(
+    \\{([(<{}[<>[]}>{[]{[(<()>
+    \\(((({<>}<{<{<>}{[]{[]{}
+    \\[[<[([]))<([[{}[[()]]]
+    \\[{[{({}]{}}([{[{{{}}([]
+    \\{<[[]]>}<{[{[{[]{()[[[]
+    \\[<(<(<(<{}))><([]([]()
+    \\<{([([[(<>()){}]>(<<{{
+    \\<{([{{}}[<[[[<>{}]]]>[]]
+;
+//const data = example_data;
 
 pub fn main() !void {
     const input: [][]u8 = blk: {
@@ -25,8 +38,10 @@ pub fn main() !void {
         break :blk list.toOwnedSlice();
     };
     
-    { // part 1
-        var score: u32 = 0;
+    {
+        var part1: u64 = 0;
+        var part2 = std.ArrayList(u64).init(gpa);
+        
         for (input) |line, line_index| {
             var stack = std.ArrayList(u8).init(gpa);
             const result: Result = for (line) |c, col_index| {
@@ -41,7 +56,8 @@ pub fn main() !void {
                                 break Result{.corrupted = c};
                             }
                         } else {
-                            break Result.incomplete;
+                            print("{d}:{s} :: {d}:{c}\n", .{line_index, line, col_index, c});
+                            unreachable; // not sure how to articulate this property of our puzzle input
                         }
                     },
                     else => {
@@ -50,30 +66,53 @@ pub fn main() !void {
                     },
                 }
             } else blk: {
-                break :blk Result.complete;
+                if (stack.items.len == 0) {
+                    break :blk .complete;
+                } else {
+                    break :blk Result{.incomplete = stack.toOwnedSlice()};
+                }
             };
             
             switch (result) {
                 Result.complete => {},
-                Result.incomplete => {},
+                Result.incomplete => |s| {
+                    var score: u64 = 0;
+                    std.mem.reverse(u8, s);
+                    for (s) |c| {
+                        score *= 5;
+                        switch (c) {
+                            '(' => score += 1,
+                            '[' => score += 2,
+                            '{' => score += 3,
+                            '<' => score += 4,
+                            else => unreachable,
+                        }
+                    }
+                    try part2.append(score);
+                    //print("{d}: {s}\n", .{score, s});
+                },
                 Result.corrupted => |c| switch (c) {
-                    ')' => score += 3,
-                    ']' => score += 57,
-                    '}' => score += 1197,
-                    '>' => score += 25137,
+                    ')' => part1 += 3,
+                    ']' => part1 += 57,
+                    '}' => part1 += 1197,
+                    '>' => part1 += 25137,
                     else => unreachable,
                 }
             }
             
         }
         
-        print("{d}\n", .{score});
+        print("{d}\n", .{part1});
+        
+        sort(u64, part2.items, {}, comptime asc(u64));
+        const middle_index = part2.items.len / 2;
+        print("{d}\n", .{part2.items[middle_index]});
     }
 }
 
 const Result = union(enum) {
     complete: void,
-    incomplete: void,
+    incomplete: []u8,
     corrupted: u8,
 };
 
