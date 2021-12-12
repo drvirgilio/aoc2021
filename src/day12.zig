@@ -12,24 +12,24 @@ const gpa = util.gpa;
 const data = @embedFile("../data/day12.txt");
 //const data = "start-A\nstart-b\nA-c\nA-b\nb-d\nA-end\nb-end";
 const edata =
-\\fs-end
-\\he-DX
-\\fs-he
-\\start-DX
-\\pj-DX
-\\end-zg
-\\zg-sl
-\\zg-pj
-\\pj-he
-\\RW-he
-\\fs-DX
-\\pj-RW
-\\zg-RW
-\\start-pj
-\\he-WI
-\\zg-he
-\\pj-fs
-\\start-RW
+    \\fs-end
+    \\he-DX
+    \\fs-he
+    \\start-DX
+    \\pj-DX
+    \\end-zg
+    \\zg-sl
+    \\zg-pj
+    \\pj-he
+    \\RW-he
+    \\fs-DX
+    \\pj-RW
+    \\zg-RW
+    \\start-pj
+    \\he-WI
+    \\zg-he
+    \\pj-fs
+    \\start-RW
 ;
 
 const Size = enum {
@@ -41,6 +41,7 @@ const Cave = struct {
     size: Size,
     name: []const u8,
     connections: []*Cave = undefined,
+    visits: usize = 0,
 };
 
 pub fn main() !void {
@@ -50,7 +51,7 @@ pub fn main() !void {
         var map = StrMap(Cave).init(gpa);
         defer map.deinit();
         while (lines.next()) |name| {
-            const cave = Cave {
+            const cave = Cave{
                 .size = if (name[0] >= 'a') .small else .big,
                 .name = name,
             };
@@ -63,13 +64,13 @@ pub fn main() !void {
         }
         break :blk list.toOwnedSlice();
     };
-    
+
     // Put pointers to each cave into a hashmap indexed by name
     var cave_names = StrMap(*Cave).init(gpa);
     for (caves) |*cave| {
         try cave_names.put(cave.name, cave);
     }
-    
+
     // For each cave, scan the input to populate the connections field
     for (caves) |*cave| {
         var cave_connection_list = List(*Cave).init(gpa);
@@ -88,7 +89,7 @@ pub fn main() !void {
         }
         cave.connections = cave_connection_list.toOwnedSlice();
     }
-    
+
     // print connections
     if (false) {
         print("Connections:\n", .{});
@@ -96,7 +97,7 @@ pub fn main() !void {
             print("{s}: ", .{cave.name});
             for (cave.connections) |cave_2, index| {
                 print("{s}", .{cave_2.name});
-                if (index+1 < cave.connections.len) {
+                if (index + 1 < cave.connections.len) {
                     print(", ", .{});
                 } else {
                     print("\n", .{});
@@ -105,36 +106,37 @@ pub fn main() !void {
         }
         print("\n", .{});
     }
+
+    var part1: usize = 0;
+    var part2: usize = 0;
     
-    const Move = struct {
-        cave: *Cave,
-        index: ?usize = null,
-    };
-    
-    var path_count: usize = 0;
     var stack = List(Move).init(gpa);
-    try stack.append(Move {.cave = cave_names.get("start").?});
+    try stack.append(Move{ .cave = cave_names.get("start").? });
     while (stack.items.len != 0) {
-        const move: *Move = &stack.items[stack.items.len-1];
+        const move: *Move = &stack.items[stack.items.len - 1];
         const cave: *Cave = move.cave;
-        const visits = blk: {
-            var list = List(*Cave).init(gpa);
-            defer list.deinit();
-            for (stack.items) |m| {
-                try list.append(m.cave);
+
+        if (false) {
+            for (stack.items) |m, index| {
+                print("{s}", .{m.cave.name});
+                if (index + 1 < stack.items.len) {
+                    print(",", .{});
+                } else {
+                    print("\n", .{});
+                }
             }
-            break :blk std.mem.count(*Cave, list.items, &[1]*Cave{cave});
-        };
-        
+        }
+
         if (move.index) |*index| {
             index.* += 1;
         } else {
+            cave.visits += 1;
             move.index = 0;
         }
-        
+
         if (std.mem.eql(u8, cave.name, "end")) {
             if (false) {
-                for (stack.items) |m,index| {
+                for (stack.items) |m, index| {
                     print("{s}", .{m.cave.name});
                     if (index + 1 < stack.items.len) {
                         print(",", .{});
@@ -143,30 +145,71 @@ pub fn main() !void {
                     }
                 }
             }
-            path_count += 1;
+            var visit_small_twice = false;
+            for (caves) |c| {
+                if (c.size == .small and c.visits > 1) {
+                    visit_small_twice = true;
+                    break;
+                }
+            }
+            if (!visit_small_twice) part1 += 1;
+            part2 += 1;
+            
+            cave.visits -= 1;
             _ = stack.pop();
             continue;
         }
-        
-        if (cave.size == Size.small and visits > 1) {
+
+        if (cave.size == Size.small and cave.visits > 2) {
+            cave.visits -= 1;
             _ = stack.pop();
             continue;
         }
-        
+
+        if (cave.size == Size.small and cave.visits > 1) {
+            if (std.mem.eql(u8, cave.name, "start")) {
+                cave.visits -= 1;
+                _ = stack.pop();
+                continue;
+            }
+            // check for any other small caves with visits > 1
+            var flag: bool = false;
+            for (caves) |*c| {
+                if (c.size == .small and c != cave and c.visits > 1) {
+                    flag = true;
+                    break;
+                }
+            }
+            if (flag) {
+                cave.visits -= 1;
+                _ = stack.pop();
+                continue;
+            }
+        }
+
         if (move.index.? >= cave.connections.len) {
             // nowhere else to go from this cave so backtrack
+            cave.visits -= 1;
             _ = stack.pop();
             continue;
         }
-        
+
         // go to next cave
         const next_cave = cave.connections[move.index.?];
-        try stack.append(Move {.cave=next_cave});
-        
+        try stack.append(Move{ .cave = next_cave });
     }
-    
-    print("{}\n", .{path_count});
+
+    assert(part1 == 4775);
+    assert(part2 == 152480);
+
+    print("{}\n", .{part1});
+    print("{}\n", .{part2});
 }
+
+const Move = struct {
+    cave: *Cave,
+    index: ?usize = null,
+};
 
 // Useful stdlib functions
 const tokenize = std.mem.tokenize;
