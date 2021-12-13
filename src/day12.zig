@@ -11,26 +11,8 @@ const gpa = util.gpa;
 
 const data = @embedFile("../data/day12.txt");
 //const data = "start-A\nstart-b\nA-c\nA-b\nb-d\nA-end\nb-end";
-const edata =
-    \\fs-end
-    \\he-DX
-    \\fs-he
-    \\start-DX
-    \\pj-DX
-    \\end-zg
-    \\zg-sl
-    \\zg-pj
-    \\pj-he
-    \\RW-he
-    \\fs-DX
-    \\pj-RW
-    \\zg-RW
-    \\start-pj
-    \\he-WI
-    \\zg-he
-    \\pj-fs
-    \\start-RW
-;
+//const data ="dc-end\nHN-start\nstart-kj\ndc-start\ndc-HN\nLN-dc\nHN-end\nkj-sa\nkj-HN\nkj-dc";
+//const data = "fs-end\nhe-DX\nfs-he\nstart-DX\npj-DX\nend-zg\nzg-sl\nzg-pj\npj-he\nRW-he\nfs-DX\npj-RW\nzg-RW\nstart-pj\nhe-WI\nzg-he\npj-fs\nstart-RW";
 
 const Size = enum {
     big,
@@ -90,113 +72,64 @@ pub fn main() !void {
         cave.connections = cave_connection_list.toOwnedSlice();
     }
 
-    // print connections
-    if (false) {
-        print("Connections:\n", .{});
-        for (caves) |cave| {
-            print("{s}: ", .{cave.name});
-            for (cave.connections) |cave_2, index| {
-                print("{s}", .{cave_2.name});
-                if (index + 1 < cave.connections.len) {
-                    print(", ", .{});
-                } else {
-                    print("\n", .{});
-                }
-            }
-        }
-        print("\n", .{});
-    }
-
     var part1: usize = 0;
     var part2: usize = 0;
-    
+
+    const Move = struct {
+        cave: *Cave,
+        index: ?usize = null,
+    };
+
     var stack = List(Move).init(gpa);
+    defer stack.deinit();
     try stack.append(Move{ .cave = cave_names.get("start").? });
-    while (stack.items.len != 0) {
-        const move: *Move = &stack.items[stack.items.len - 1];
-        const cave: *Cave = move.cave;
+    backtrack: while (stack.items.len != 0) : ({
+        const move = stack.pop();
+        move.cave.visits -= 1;
+    }) {
+        while (true) {
+            const move: *Move = &stack.items[stack.items.len - 1];
+            const cave: *Cave = move.cave;
 
-        if (false) {
-            for (stack.items) |m, index| {
-                print("{s}", .{m.cave.name});
-                if (index + 1 < stack.items.len) {
-                    print(",", .{});
-                } else {
-                    print("\n", .{});
-                }
+            if (move.index) |*index| {
+                index.* += 1;
+            } else {
+                cave.visits += 1;
+                move.index = 0;
             }
-        }
+            if (move.index.? >= cave.connections.len) continue :backtrack;
 
-        if (move.index) |*index| {
-            index.* += 1;
-        } else {
-            cave.visits += 1;
-            move.index = 0;
-        }
-
-        if (std.mem.eql(u8, cave.name, "end")) {
-            if (false) {
-                for (stack.items) |m, index| {
-                    print("{s}", .{m.cave.name});
-                    if (index + 1 < stack.items.len) {
-                        print(",", .{});
-                    } else {
-                        print("\n", .{});
+            if (std.mem.eql(u8, cave.name, "end")) {
+                // check if any small caves were visited twice
+                const visit_small_twice = blk: {
+                    var ret = false;
+                    for (caves) |c| {
+                        if (c.size == .small and c.visits > 1) {
+                            ret = true;
+                            break;
+                        }
                     }
+                    break :blk ret;
+                };
+
+                if (!visit_small_twice) part1 += 1;
+                part2 += 1;
+
+                continue :backtrack;
+            }
+            if (cave.size == Size.small and cave.visits > 2) continue :backtrack;
+            if (cave.size == Size.small and cave.visits > 1) {
+                if (std.mem.eql(u8, cave.name, "start")) continue :backtrack;
+                // check for any other small caves with visits > 1
+                for (caves) |*c| {
+                    if (c.size == .small and c != cave and c.visits > 1) continue :backtrack;
                 }
             }
-            var visit_small_twice = false;
-            for (caves) |c| {
-                if (c.size == .small and c.visits > 1) {
-                    visit_small_twice = true;
-                    break;
-                }
-            }
-            if (!visit_small_twice) part1 += 1;
-            part2 += 1;
-            
-            cave.visits -= 1;
-            _ = stack.pop();
-            continue;
-        }
 
-        if (cave.size == Size.small and cave.visits > 2) {
-            cave.visits -= 1;
-            _ = stack.pop();
-            continue;
+            // go to next cave
+            const next_cave = cave.connections[move.index.?];
+            try stack.append(Move{ .cave = next_cave });
         }
-
-        if (cave.size == Size.small and cave.visits > 1) {
-            if (std.mem.eql(u8, cave.name, "start")) {
-                cave.visits -= 1;
-                _ = stack.pop();
-                continue;
-            }
-            // check for any other small caves with visits > 1
-            var flag: bool = false;
-            for (caves) |*c| {
-                if (c.size == .small and c != cave and c.visits > 1) {
-                    flag = true;
-                    break;
-                }
-            }
-            if (flag) {
-                cave.visits -= 1;
-                _ = stack.pop();
-                continue;
-            }
-        }
-
-        if (move.index.? >= cave.connections.len) {
-            // nowhere else to go from this cave so backtrack
-            cave.visits -= 1;
-            _ = stack.pop();
-            continue;
-        }
-
-        // go to next cave
-        const next_cave = cave.connections[move.index.?];
-        try stack.append(Move{ .cave = next_cave });
     }
 
     assert(part1 == 4775);
@@ -205,11 +138,6 @@ pub fn main() !void {
     print("{}\n", .{part1});
     print("{}\n", .{part2});
 }
-
-const Move = struct {
-    cave: *Cave,
-    index: ?usize = null,
-};
 
 // Useful stdlib functions
 const tokenize = std.mem.tokenize;
