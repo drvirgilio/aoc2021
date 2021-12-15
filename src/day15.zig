@@ -17,19 +17,26 @@ const num_cols = 100;
 //const num_cols = 10;
 //const num_rows = 10;
 
+const Size = struct {
+    height: usize,
+    width: usize,
+};
+
 const Location = struct {
     row: usize,
     col: usize,
 };
 
-fn locationToIndex(location: Location) usize {
-    const index = location.row * num_cols + location.col;
+fn locationToIndex(location: Location, size: Size) usize {
+    assert(location.row < size.height);
+    assert(location.col < size.width);
+    const index = location.row * size.height + location.col;
     return index;
 }
 
-fn indexToLocation(index: usize) Location {
-    const col = index % num_cols;
-    const row = index / num_cols;
+fn indexToLocation(index: usize, size: Size) Location {
+    const col = index % size.width;
+    const row = index / size.width;
     return .{ .col = col, .row = row };
 }
 
@@ -39,45 +46,126 @@ fn taxiLocation(a: Location, b: Location) usize {
     return row_delta + col_delta;
 }
 
-fn taxiIndex(a: usize, b: usize) usize {
-    return taxiLocation(indexToLocation(a), indexToLocation(b));
+fn taxiIndex(a: usize, b: usize, size: Size) usize {
+    const a_loc = indexToLocation(a, size);
+    const b_loc = indexToLocation(b, size);
+
+    assert(a_loc.row < size.height and a_loc.col < size.width);
+    assert(b_loc.row < size.height and b_loc.col < size.width);
+
+    return taxiLocation(a_loc, b_loc);
 }
 
-fn getNeighbors(buf: []usize, index: usize) []usize {
+fn getNeighbors(buf: []usize, index: usize, size: Size) []usize {
     var buffer = buf;
     assert(buffer.len >= 4);
-    const loc = indexToLocation(index);
-    assert(loc.row < num_rows);
-    assert(loc.col < num_cols);
+    const loc = indexToLocation(index, size);
+    assert(loc.row < size.height);
+    assert(loc.col < size.width);
 
     const up_exists = loc.row > 0;
     const left_exists = loc.col > 0;
-    const down_exists = loc.row + 1 < num_rows;
-    const right_exists = loc.col + 1 < num_cols;
+    const down_exists = loc.row + 1 < size.height;
+    const right_exists = loc.col + 1 < size.width;
 
     var i: usize = 0;
     if (up_exists) {
-        const up = locationToIndex(.{ .row = loc.row - 1, .col = loc.col });
+        const up = locationToIndex(.{ .row = loc.row - 1, .col = loc.col }, size);
         buffer[i] = up;
         i += 1;
     }
     if (left_exists) {
-        const left = locationToIndex(.{ .row = loc.row, .col = loc.col - 1 });
+        const left = locationToIndex(.{ .row = loc.row, .col = loc.col - 1 }, size);
         buffer[i] = left;
         i += 1;
     }
     if (down_exists) {
-        const down = locationToIndex(.{ .row = loc.row + 1, .col = loc.col });
+        const down = locationToIndex(.{ .row = loc.row + 1, .col = loc.col }, size);
         buffer[i] = down;
         i += 1;
     }
     if (right_exists) {
-        const left = locationToIndex(.{ .row = loc.row, .col = loc.col + 1 });
+        const left = locationToIndex(.{ .row = loc.row, .col = loc.col + 1 }, size);
         buffer[i] = left;
         i += 1;
     }
 
     return buffer[0..i];
+}
+
+fn aStar(input: []const u8, start: usize, end: usize, size: Size) !usize {
+    assert(start < input.len);
+    assert(end < input.len);
+
+    // set of nodes that need to be expanded
+    var open_set = try BitSet.initEmpty(input.len, gpa);
+    open_set.set(start); // start index
+
+    // value is preceding node on cheapest path from start to key
+    var came_from = Map(usize, usize).init(gpa);
+    defer came_from.deinit();
+
+    // value is cost of cheapest path from start to key
+    var g_score = Map(usize, usize).init(gpa);
+    defer g_score.deinit();
+    try g_score.put(start, 0);
+
+    // value is best guess of cheapest total cost from start to finish which goes through key
+    var f_score = Map(usize, usize).init(gpa);
+    defer f_score.deinit();
+    try f_score.put(start, taxiIndex(start, end, size));
+
+    while (open_set.count() > 0) {
+        // node in open_set with lowest f_score
+        // O(N) - but would be O(1) if open_set were min-heap or priority queue
+        const current: usize = blk: {
+            var iter = open_set.iterator(.{});
+            var min_f_score: usize = std.math.maxInt(usize);
+            var ret: usize = undefined; // ret must be set at least once in while loop
+            while (iter.next()) |index| {
+                if (min_f_score >= f_score.get(index).?) {
+                    min_f_score = f_score.get(index).?;
+                    ret = index;
+                }
+            }
+            break :blk ret;
+        };
+
+        if (current == end) {
+            break;
+        }
+
+        //        print("{x}\n", .{current});
+
+        open_set.unset(current);
+
+        var buf: [4]usize = undefined;
+        const neighbors: []usize = getNeighbors(&buf, current, size);
+        for (neighbors) |neighbor| {
+            // cost of edge from current to neighbor
+            // same as value in cell of neighbor
+            const d = input[neighbor];
+
+            // cost of path from start to neighbor through current
+            const tentative_g_score = if (g_score.get(current)) |g| d + g else std.math.maxInt(usize);
+            if (tentative_g_score < if (g_score.get(neighbor)) |g| g else std.math.maxInt(usize)) {
+                // This path to neighbor is cheaper than previously recorded paths to neighbor
+                try came_from.put(neighbor, current);
+                try g_score.put(neighbor, tentative_g_score);
+                try f_score.put(neighbor, tentative_g_score + taxiIndex(neighbor, end, size));
+                open_set.set(neighbor);
+                //                print("{d:0>2}: set gs to {d}\n", .{neighbor, tentative_g_score});
+            }
+
+            //            print("neighbor: {d:0>2} :: tgs: {d}\n", .{neighbor, tentative_g_score});
+        }
+    }
+
+    //    print("end: {d}\n", .{end});
+
+    // cost is the g_score of the end node
+    const cost = g_score.get(end).?;
+    return cost;
 }
 
 pub fn main() !void {
@@ -97,77 +185,46 @@ pub fn main() !void {
         break :blk rows.buffer;
     };
 
-    { // part 1
-        const start = 0;
-        const end = locationToIndex(.{ .row = num_rows - 1, .col = num_cols - 1 }); // bottom right corner
-
-        // set of nodes that need to be expanded
-        var open_set = try BitSet.initEmpty(num_cols * num_rows, gpa);
-        open_set.set(start); // start index
-
-        // value is preceding node on cheapest path from start to key
-        var came_from = Map(usize, usize).init(gpa);
-        defer came_from.deinit();
-
-        // value is cost of cheapest path from start to key
-        var g_score = [_]usize{std.math.maxInt(usize)} ** (num_rows * num_cols);
-        g_score[start] = 0;
-
-        // value is best guess of cheapest total cost from start to finish which goes through key
-        var f_score = [_]usize{std.math.maxInt(usize)} ** (num_rows * num_cols);
-        f_score[start] = taxiIndex(start, end);
-
-        while (open_set.count() > 0) {
-            // node in open_set with lowest f_score
-            // O(N) - but would be O(1) if open_set were min-heap or priority queue
-            const current: usize = blk: {
-                var iter = open_set.iterator(.{});
-                var min_f_score: usize = std.math.maxInt(usize);
-                var ret: usize = undefined; // ret must be set at least once in while loop
-                while (iter.next()) |index| {
-                    if (min_f_score >= f_score[index]) {
-                        min_f_score = f_score[index];
-                        ret = index;
-                    }
-                }
-                break :blk ret;
-            };
-
-            if (current == end) {
-                break;
+    const input_1: [num_rows * num_cols]u8 = blk: {
+        var list = try std.BoundedArray(u8, num_cols * num_rows).init(0);
+        for (input) |rows| {
+            for (rows) |cell| {
+                try list.append(cell);
             }
+        }
+        break :blk list.buffer;
+    };
 
-            open_set.unset(current);
+    const input_2: [num_rows * num_cols * 25]u8 = blk: {
+        var ret: [num_rows * num_cols * 25]u8 = undefined;
+        for (ret) |*cell, index| {
+            const row = index / (num_rows * 5);
+            const col = index % (num_cols * 5);
 
-            var buf: [4]usize = undefined;
-            const neighbors: []usize = getNeighbors(&buf, current);
-            for (neighbors) |neighbor| {
-                // cost of edge from current to neighbor
-                // same as value in cell of neighbor
-                const d = blk: {
-                    const loc = indexToLocation(neighbor);
-                    break :blk input[loc.row][loc.col];
-                };
+            const row_in = row % num_rows;
+            const col_in = col % num_cols;
 
-                // cost of path from start to neighbor through current
-                const tentative_g_score = g_score[current] + d;
-                if (tentative_g_score < g_score[neighbor]) {
-                    // This path to neighbor is cheaper than previously recorded paths to neighbor
-                    try came_from.put(neighbor, current);
-                    g_score[neighbor] = tentative_g_score;
-                    f_score[neighbor] = tentative_g_score + taxiIndex(neighbor, end);
-                    open_set.set(neighbor);
-                }
-            }
+            const row_add = row / num_rows;
+            const col_add = col / num_cols;
 
-            //print("{d}\n", .{neighbors});
+            cell.* = @truncate(u8, (input[row_in][col_in] + row_add + col_add - 1) % 9 + 1);
         }
 
-        // part1 is the g_score of the end node
-        const part1 = g_score[end];
-        print("{d}\n", .{part1});
-        if (part1 == std.math.maxInt(usize)) {
-            print("g_score[end] never set\n", .{});
+        break :blk ret;
+    };
+
+    const part1 = try aStar(&input_1, 0, input_1.len - 1, Size{ .height = num_rows, .width = num_cols });
+    assert(part1 == 415);
+    print("{d}\n", .{part1});
+
+    const part2 = try aStar(&input_2, 0, input_2.len - 1, Size{ .height = num_rows * 5, .width = num_cols * 5 });
+    assert(part2 == 2864);
+    print("{d}\n", .{part2});
+
+    if (false) {
+        for (input_2) |n, index| {
+            print("{d}", .{n});
+            if ((index + 1) % (num_cols * 5) == 0) print("\n", .{});
         }
     }
 }
