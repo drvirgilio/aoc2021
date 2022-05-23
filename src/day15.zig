@@ -93,7 +93,23 @@ fn getNeighbors(buf: []usize, index: usize, size: Size) []usize {
     return buffer[0..i];
 }
 
-fn aStar(input: []const u8, start: usize, end: usize, size: Size) !usize {
+fn getNeighborhood1(buf: []usize, index: usize) []usize {
+    var buffer = buf;
+    assert(buffer.len >= 4);
+
+
+    const up_exists = loc.row > 0;
+    const left_exists = loc.col > 0;
+    const down_exists = loc.row + 1 < size.height;
+    const right_exists = loc.col + 1 < size.width;
+
+}
+
+fn getNeighborhood2(buf: []usize, index: usize) []usize {
+    
+}
+
+fn aStar(input: []const u8, start: usize, end: usize, getNeighborhood: fn (buf: []usize, node: usize) []usize) !usize {
     assert(start < input.len);
     assert(end < input.len);
 
@@ -140,7 +156,7 @@ fn aStar(input: []const u8, start: usize, end: usize, size: Size) !usize {
         open_set.unset(current);
 
         var buf: [4]usize = undefined;
-        const neighbors: []usize = getNeighbors(&buf, current, size);
+        const neighbors: []usize = getNeighborhood(&buf, current);
         for (neighbors) |neighbor| {
             // cost of edge from current to neighbor
             // same as value in cell of neighbor
@@ -212,6 +228,8 @@ pub fn main() !void {
 
         break :blk ret;
     };
+
+    
 
     const part1 = try aStar(&input_1, 0, input_1.len - 1, Size{ .height = num_rows, .width = num_cols });
     assert(part1 == 415);
